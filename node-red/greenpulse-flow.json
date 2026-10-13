@@ -1,0 +1,240 @@
+[
+  {
+    "id": "gp-tab",
+    "type": "tab",
+    "label": "GreenPulse AWS",
+    "disabled": false,
+    "info": "Configure AWS endpoint, DEVICE_ID, client ID and TLS certificate files. Requires @flowfuse/node-red-dashboard."
+  },
+  {
+    "id": "gp-broker",
+    "type": "mqtt-broker",
+    "name": "AWS IoT Core",
+    "broker": "${AWS_IOT_ENDPOINT}",
+    "port": "8883",
+    "clientid": "${NODE_RED_CLIENT_ID}",
+    "autoConnect": true,
+    "usetls": true,
+    "tls": "gp-tls",
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true
+  },
+  {
+    "id": "gp-tls",
+    "type": "tls-config",
+    "name": "Dashboard certificate (configure)",
+    "cert": "/data/certs/dashboard-certificate.pem.crt",
+    "key": "/data/certs/dashboard-private.pem.key",
+    "ca": "/data/certs/AmazonRootCA1.pem",
+    "certname": "",
+    "keyname": "",
+    "caname": "",
+    "servername": "",
+    "verifyservercert": true,
+    "alpnprotocol": ""
+  },
+  {
+    "id": "gp-base",
+    "type": "ui-base",
+    "name": "GreenPulse",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": [
+      "ui-notification",
+      "ui-control"
+    ],
+    "showPathInSidebar": false,
+    "navigationStyle": "default",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 1,
+    "showDisconnectNotification": true
+  },
+  {
+    "id": "gp-theme",
+    "type": "ui-theme",
+    "name": "GreenPulse",
+    "colors": {
+      "surface": "#ffffff",
+      "primary": "#24704b",
+      "bgPage": "#f5f8f5",
+      "groupBg": "#ffffff",
+      "groupOutline": "#d7e4dc"
+    },
+    "sizes": {
+      "density": "default",
+      "pagePadding": "12px",
+      "groupGap": "12px",
+      "groupBorderRadius": "4px",
+      "widgetGap": "12px"
+    }
+  },
+  {
+    "id": "gp-page",
+    "type": "ui-page",
+    "name": "Plant monitor",
+    "ui": "gp-base",
+    "path": "/plant",
+    "icon": "eco",
+    "layout": "grid",
+    "theme": "gp-theme",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": "0",
+        "cols": "3"
+      },
+      {
+        "name": "Tablet",
+        "px": "576",
+        "cols": "6"
+      },
+      {
+        "name": "Desktop",
+        "px": "1024",
+        "cols": "12"
+      }
+    ],
+    "order": 1,
+    "className": "",
+    "visible": true,
+    "disabled": false
+  },
+  {
+    "id": "gp-group",
+    "type": "ui-group",
+    "name": "GreenPulse live data",
+    "page": "gp-page",
+    "width": "12",
+    "height": "1",
+    "order": 1,
+    "showTitle": false,
+    "className": "",
+    "visible": true,
+    "disabled": false,
+    "groupType": "default"
+  },
+  {
+    "id": "gp-input",
+    "type": "mqtt in",
+    "z": "gp-tab",
+    "name": "All device topics",
+    "topic": "greenpulse/device/${DEVICE_ID}/#",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "gp-broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 180,
+    "y": 100,
+    "wires": [
+      [
+        "gp-aggregate",
+        "gp-debug"
+      ]
+    ]
+  },
+  {
+    "id": "gp-status",
+    "type": "status",
+    "z": "gp-tab",
+    "name": "Broker connection",
+    "scope": [
+      "gp-input"
+    ],
+    "x": 180,
+    "y": 160,
+    "wires": [
+      [
+        "gp-aggregate"
+      ]
+    ]
+  },
+  {
+    "id": "gp-tick",
+    "type": "inject",
+    "z": "gp-tab",
+    "name": "Refresh stale status",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "once": true,
+    "onceDelay": "1",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 220,
+    "wires": [
+      [
+        "gp-aggregate"
+      ]
+    ]
+  },
+  {
+    "id": "gp-aggregate",
+    "type": "function",
+    "z": "gp-tab",
+    "name": "Latest readings and payloads",
+    "func": "let state=flow.get('greenpulse') || {};\nconst now=Date.now();\nif (msg.status) {\n  state.broker=msg.status.text || 'unknown';\n} else if (msg.topic) {\n  const key=msg.topic.split('/').pop();\n  if (['sensors','status','llm-input','care','alerts'].includes(key)) {\n    let data=msg.payload;\n    try { if (typeof data==='string') data=JSON.parse(data); }\n    catch(e) { node.warn('Invalid MQTT JSON'); return null; }\n    if (!data || typeof data!=='object') return null;\n    state[key]={topic:msg.topic,data,received:new Date(now).toISOString(),received_ms:now};\n  }\n}\nconst last=state.sensors?.received_ms || 0;\nconst sensorTs=(state.sensors?.data?.ts || 0)*1000;\nconst sensorFresh=now-sensorTs<45000 && sensorTs-now<60000;\nstate.device=last && now-last<45000 && sensorFresh && state.status?.data?.online!==false ? 'online' : 'offline / stale';\nconst expiry=state.care?.data?.expires_ts || 0;\nstate.backend=expiry*1000>now ? 'response current' : 'waiting / stale';\nflow.set('greenpulse',state);\nreturn {payload:state};",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 160,
+    "wires": [
+      [
+        "gp-template"
+      ]
+    ]
+  },
+  {
+    "id": "gp-template",
+    "type": "ui-template",
+    "z": "gp-tab",
+    "group": "gp-group",
+    "page": "",
+    "ui": "",
+    "name": "GreenPulse dashboard",
+    "order": 1,
+    "width": "12",
+    "height": "0",
+    "head": "",
+    "format": "<template>\n<div class=\"gp\" v-if=\"msg?.payload\">\n  <header><h1>GreenPulse</h1><p>Live plant conditions and cloud care advice</p></header>\n  <p><strong>MQTT:</strong> {{ msg.payload.broker || 'unknown' }} \u00b7\n     <strong>Device:</strong> {{ msg.payload.device || 'unknown' }} \u00b7\n     <strong>Backend:</strong> {{ msg.payload.backend || 'waiting' }}</p>\n  <p>Last sensor message: {{ msg.payload.sensors?.received || 'Waiting for device' }}</p>\n  <h2>Sensor readings</h2>\n  <table><thead><tr><th>Measurement</th><th>Value</th></tr></thead><tbody>\n    <tr v-for=\"row in rows\" :key=\"row[0]\"><td>{{ row[0] }}</td><td>{{ row[1] ?? 'Unavailable' }} {{ row[1] == null ? '' : row[2] }}</td></tr>\n  </tbody></table>\n  <h2>Care advice</h2>\n  <p><strong>Priority:</strong> {{ msg.payload.care?.data?.priority || 'unknown' }}\n     <span v-if=\"msg.payload.care\"> \u00b7 LLM: {{ msg.payload.care.data.llm_status }}</span></p>\n  <p>{{ msg.payload.care?.data?.care_message || 'Waiting for backend response' }}</p>\n  <blockquote v-if=\"msg.payload.care?.data?.quote\">{{ msg.payload.care.data.quote }}</blockquote>\n  <h3>Weather</h3><p>{{ msg.payload.care?.data?.weather_summary || 'Waiting' }}</p>\n  <h3>Notifications</h3><p>{{ msg.payload.care?.data?.notification_summary || 'Waiting' }}</p>\n  <h2>MQTT evidence</h2>\n  <section v-for=\"key in ['sensors','status','llm-input','care','alerts']\" :key=\"key\">\n    <h3>{{ key }}</h3>\n    <p class=\"topic\">{{ msg.payload[key]?.topic || 'No message yet' }}</p>\n    <p>Received: {{ msg.payload[key]?.received || '\u2014' }}</p>\n    <pre>{{ pretty(msg.payload[key]?.data) }}</pre>\n  </section>\n</div>\n<p v-else>Waiting for MQTT. Configure the AWS broker and dashboard certificates.</p>\n</template>\n<script>\nexport default {\n  computed: {\n    rows() {\n      const d = this.msg?.payload?.sensors?.data || {};\n      return [['Soil moisture',d.soil?.moisture,'%'],['Soil temperature',d.soil?.temperature,'\u00b0C'],\n        ['pH',d.soil?.ph,''],['Electrical conductivity',d.soil?.ec,'\u00b5S/cm'],\n        ['Nitrogen',d.soil?.n,'mg/kg'],['Phosphorus',d.soil?.p,'mg/kg'],\n        ['Potassium',d.soil?.k,'mg/kg'],['Air temperature',d.air?.temperature,'\u00b0C'],\n        ['Air humidity',d.air?.humidity,'%']];\n    }\n  },\n  methods: { pretty(value) { return value ? JSON.stringify(value,null,2) : 'Waiting'; } }\n};\n</script>\n<style>\n.gp { max-width:1000px; margin:0 auto; padding:16px; color:#17392c; }\n.gp h1 { font-size:32px; margin-bottom:8px; }\n.gp h2 { margin-top:28px; border-bottom:1px solid #d7e4dc; padding-bottom:8px; }\n.gp table { width:100%; border-collapse:collapse; }\n.gp th,.gp td { text-align:left; padding:10px; border-bottom:1px solid #d7e4dc; }\n.gp pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#f2f6f3; padding:16px; max-height:420px; overflow:auto; }\n.gp .topic { overflow-wrap:anywhere; font-family:monospace; }\n.gp blockquote { border-left:3px solid #3b8c64; padding-left:16px; }\n</style>",
+    "storeOutMessages": true,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 740,
+    "y": 160,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "gp-debug",
+    "type": "debug",
+    "z": "gp-tab",
+    "name": "MQTT subscribed payload",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 470,
+    "y": 80,
+    "wires": []
+  }
+]

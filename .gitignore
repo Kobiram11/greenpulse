@@ -1,0 +1,9 @@
+.env
+secrets.h
+*.pem
+*.key
+*.crt
+__pycache__/
+.venv/
+data/
+node_modules/

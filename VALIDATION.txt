@@ -1,0 +1,6 @@
+Validation date: 2026-10-13
+Seven dependency-free Python unit tests passed.
+Python source parsed and compiled successfully.
+Node-RED flow references, aggregation, malformed JSON handling, disconnect status and Vue script syntax checked with Node.js.
+No embedded private keys found.
+Not performed: Arduino compilation, third-party dependency installation, actual Node-RED rendering, AWS deployment, LLM/API/account access or physical hardware tests.
